@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/base64"
+	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -36,17 +38,14 @@ func (s *session) Rcpt(to string, opts *smtp.RcptOptions) error {
 
 func (s *session) Data(r io.Reader) error {
 	msg, err := mail.ReadMessage(r)
+
 	if err != nil {
-		return fmt.Errorf("error reading message: %v", err)
+		return errors.Join(errors.New("error reading message"), err)
 	}
 
-	// Extract headers
-	headers := msg.Header
-	from := headers.Get("From")
-	to := headers.Get("To")
-	subject := headers.Get("Subject")
+	fmt.Printf("Got new email: %s -> %s\n", msg.Header.Get("From"), msg.Header.Get("To"))
 
-	fmt.Printf("Got new email: %s -> %s\n", from, to)
+	subject := msg.Header.Get("Subject")
 
 	if strings.HasPrefix(subject, "=?") && strings.HasSuffix(subject, "?=") {
 		rawEncoding := strings.Split(subject, "?")[3]
@@ -55,7 +54,7 @@ func (s *session) Data(r io.Reader) error {
 		decodedBytes, err := io.ReadAll(decoded)
 
 		if err != nil {
-			return fmt.Errorf("error decoding base64: %v", err)
+			return errors.Join(errors.New("error decoding base64"), err)
 		}
 
 		subject = string(decodedBytes)
@@ -63,12 +62,12 @@ func (s *session) Data(r io.Reader) error {
 
 	fmt.Printf("Subject: %s\n", subject)
 
-	encoding := headers.Get("Content-Transfer-Encoding")
+	encoding := msg.Header.Get("Content-Transfer-Encoding")
 
 	raw, err := io.ReadAll(msg.Body)
 
 	if err != nil {
-		return fmt.Errorf("error reading message body: %v", err)
+		return errors.Join(errors.New("error reading message body"), err)
 	}
 
 	body := string(raw)
@@ -78,7 +77,7 @@ func (s *session) Data(r io.Reader) error {
 		decodedBytes, err := io.ReadAll(decoded)
 
 		if err != nil {
-			return fmt.Errorf("error decoding base64: %v", err)
+			return errors.Join(errors.New("error decoding base64"), err)
 		}
 
 		body = string(decodedBytes)
@@ -98,15 +97,20 @@ func (s *session) Logout() error {
 func newServer() {
 	s := smtp.NewServer(&backend{})
 
-	s.Addr = "127.0.0.1:1025"
-	s.Domain = "localhost"
+	s.Addr = addr
 	s.AllowInsecureAuth = false
 
-	log.Println("Starting SMTP server at", "127.0.0.1:1025")
+	log.Println("Starting SMTP server at", addr)
 	log.Fatal(s.ListenAndServe())
 }
 
+var addr string
+
 func main() {
+	flag.StringVar(&addr, "addr", ":1025", "SMTP server address")
+
+	flag.Parse()
+
 	go newServer()
 
 	s := make(chan os.Signal, 1)
